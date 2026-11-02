@@ -1,18 +1,72 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Sudoku Game</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sudoku Studio</title>
   <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
-  <h1>Sudoku Game</h1>
-  <div id="sudoku-board"></div>
-  <div class="controls">
-    <button id="new-game">New Game</button>
-    <button id="check-solution">Check Solution</button>
-    <span id="message"></span>
-  </div>
-  <script src="/static/main.js"></script>
+  <main class="app-shell">
+    <header class="app-header">
+      <div>
+        <p class="eyebrow">A mindful numbers game</p>
+        <h1>Sudoku Studio</h1>
+      </div>
+      <button id="theme-toggle" class="icon-button" type="button" aria-pressed="false">
+        <span aria-hidden="true">◐</span>
+        <span class="visually-hidden">Toggle dark mode</span>
+      </button>
+    </header>
+
+    <div class="game-layout">
+      <section class="game-panel" aria-labelledby="game-title">
+        <h2 id="game-title" class="visually-hidden">Sudoku game</h2>
+        <div class="game-toolbar">
+          <label class="field-label" for="difficulty">
+            Difficulty
+            <select id="difficulty" name="difficulty">
+              <option value="easy">Easy</option>
+              <option value="medium" selected>Medium</option>
+              <option value="hard">Hard</option>
+            </select>
+          </label>
+          <p class="timer" aria-label="Elapsed time"><span>Time</span> <strong id="timer">00:00</strong></p>
+        </div>
+
+        <div id="sudoku-board" class="sudoku-board" role="grid" aria-label="Sudoku board"></div>
+
+        <div class="controls" aria-label="Game controls">
+          <button id="new-game" type="button">New game</button>
+          <button id="hint-button" type="button">Hint</button>
+          <button id="check-button" type="button">Check</button>
+        </div>
+        <p id="message" class="message" role="status" aria-live="polite"></p>
+
+        <section id="completion-panel" class="completion-panel" hidden aria-labelledby="completion-title">
+          <h2 id="completion-title">Puzzle complete!</h2>
+          <p id="completion-summary"></p>
+          <form id="score-form">
+            <label for="player-name">Add your name to the Top 10</label>
+            <div class="score-entry">
+              <input id="player-name" name="player-name" type="text" maxlength="24" autocomplete="name" required>
+              <button type="submit">Save score</button>
+            </div>
+          </form>
+        </section>
+      </section>
+
+      <aside class="leaderboard-panel" aria-labelledby="leaderboard-title">
+        <div>
+          <p class="eyebrow">Personal bests</p>
+          <h2 id="leaderboard-title">Top 10</h2>
+        </div>
+        <ol id="leaderboard" class="leaderboard"></ol>
+        <p class="leaderboard-note">Scores are stored only in this browser.</p>
+      </aside>
+    </div>
+  </main>
+  <footer class="app-version">Sudoku Studio v{{ version }}</footer>
+  <script type="module" src="/static/main.js"></script>
 </body>
 </html>

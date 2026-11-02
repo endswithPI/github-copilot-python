@@ -1,105 +1,181 @@
-// Client-side rendering and interaction for the Flask-backed Sudoku
-const SIZE = 9;
-let puzzle = [];
+import { checkBoard, createGame, requestHint } from "./api.js";
+import { createBoard, renderBoard } from "./board.js";
+import {
+  applyCheckResult,
+  applyHint,
+  createGameState,
+  isBoardFull,
+  updateCell,
+} from "./game-state.js";
+import { addScore, loadLeaderboard, renderLeaderboard } from "./leaderboard.js";
+import { initializeTheme } from "./theme.js";
+import { createTimer, formatTime } from "./timer.js";
 
-function createBoardElement() {
-  const boardDiv = document.getElementById('sudoku-board');
-  boardDiv.innerHTML = '';
-  for (let i = 0; i < SIZE; i++) {
-    const rowDiv = document.createElement('div');
-    rowDiv.className = 'sudoku-row';
-    for (let j = 0; j < SIZE; j++) {
-      const input = document.createElement('input');
-      input.type = 'text';
-      input.maxLength = 1;
-      input.className = 'sudoku-cell';
-      input.dataset.row = i;
-      input.dataset.col = j;
-      input.addEventListener('input', (e) => {
-        const val = e.target.value.replace(/[^1-9]/g, '');
-        e.target.value = val;
-      });
-      rowDiv.appendChild(input);
-    }
-    boardDiv.appendChild(rowDiv);
+const elements = {
+  board: document.getElementById("sudoku-board"),
+  difficulty: document.getElementById("difficulty"),
+  timer: document.getElementById("timer"),
+  newGame: document.getElementById("new-game"),
+  hint: document.getElementById("hint-button"),
+  check: document.getElementById("check-button"),
+  message: document.getElementById("message"),
+  completion: document.getElementById("completion-panel"),
+  completionSummary: document.getElementById("completion-summary"),
+  scoreForm: document.getElementById("score-form"),
+  playerName: document.getElementById("player-name"),
+  leaderboard: document.getElementById("leaderboard"),
+  themeToggle: document.getElementById("theme-toggle"),
+};
+
+let state = null;
+let loading = false;
+const timer = createTimer(elements.timer);
+
+function announce(message, isError = false) {
+  elements.message.textContent = message;
+  elements.message.classList.toggle("is-error", isError);
+}
+
+function setLoading(isLoading) {
+  loading = isLoading;
+  elements.newGame.disabled = isLoading;
+  elements.difficulty.disabled = isLoading;
+  elements.hint.disabled = isLoading || Boolean(state?.complete);
+  elements.check.disabled = isLoading || Boolean(state?.complete);
+}
+
+function render() {
+  if (state) {
+    renderBoard(elements.board, state);
   }
 }
 
-function renderPuzzle(puz) {
-  puzzle = puz;
-  createBoardElement();
-  const boardDiv = document.getElementById('sudoku-board');
-  const inputs = boardDiv.getElementsByTagName('input');
-  for (let i = 0; i < SIZE; i++) {
-    for (let j = 0; j < SIZE; j++) {
-      const idx = i * SIZE + j;
-      const val = puzzle[i][j];
-      const inp = inputs[idx];
-      if (val !== 0) {
-        inp.value = val;
-        inp.disabled = true;
-        inp.className += ' prefilled';
-      } else {
-        inp.value = '';
-        inp.disabled = false;
-      }
-    }
+async function startNewGame() {
+  setLoading(true);
+  elements.completion.hidden = true;
+  elements.scoreForm.reset();
+  elements.scoreForm.hidden = false;
+  try {
+    const payload = await createGame(elements.difficulty.value);
+    state = createGameState(payload);
+    timer.start();
+    render();
+    announce(`${payload.difficulty[0].toUpperCase()}${payload.difficulty.slice(1)} puzzle ready.`);
+  } catch (error) {
+    announce(error.message, true);
+  } finally {
+    setLoading(false);
   }
 }
 
-async function newGame() {
-  const res = await fetch('/new');
-  const data = await res.json();
-  renderPuzzle(data.puzzle);
-  document.getElementById('message').innerText = '';
+async function checkCurrentBoard(showSuccessMessage = true) {
+  if (!state || loading) {
+    return false;
+  }
+  setLoading(true);
+  try {
+    const result = await checkBoard(state.gameId, state.board);
+    const complete = applyCheckResult(state, result);
+    render();
+    if (complete) {
+      completeGame();
+      return true;
+    }
+    if (result.incorrect.length) {
+      announce(`${result.incorrect.length} entr${result.incorrect.length === 1 ? "y is" : "ies are"} incorrect.`, true);
+    } else if (result.conflicts.length) {
+      announce("Resolve the highlighted conflicts before continuing.", true);
+    } else if (showSuccessMessage) {
+      announce("No incorrect entries so far. Keep going!");
+    }
+  } catch (error) {
+    announce(error.message, true);
+  } finally {
+    setLoading(false);
+  }
+  return false;
 }
 
-async function checkSolution() {
-  const boardDiv = document.getElementById('sudoku-board');
-  const inputs = boardDiv.getElementsByTagName('input');
-  const board = [];
-  for (let i = 0; i < SIZE; i++) {
-    board[i] = [];
-    for (let j = 0; j < SIZE; j++) {
-      const idx = i * SIZE + j;
-      const val = inputs[idx].value;
-      board[i][j] = val ? parseInt(val, 10) : 0;
-    }
-  }
-  const res = await fetch('/check', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({board})
-  });
-  const data = await res.json();
-  const msg = document.getElementById('message');
-  if (data.error) {
-    msg.style.color = '#d32f2f';
-    msg.innerText = data.error;
+function completeGame() {
+  if (state.complete) {
     return;
   }
-  const incorrect = new Set(data.incorrect.map(x => x[0]*SIZE + x[1]));
-  for (let idx = 0; idx < inputs.length; idx++) {
-    const inp = inputs[idx];
-    if (inp.disabled) continue;
-    inp.className = 'sudoku-cell';
-    if (incorrect.has(idx)) {
-      inp.className = 'sudoku-cell incorrect';
-    }
+  state.complete = true;
+  timer.stop();
+  render();
+  const elapsed = timer.elapsedSeconds();
+  elements.completionSummary.textContent = `You solved this ${state.difficulty} puzzle in ${formatTime(elapsed)} using ${state.hintsUsed} hint${state.hintsUsed === 1 ? "" : "s"}.`;
+  elements.completion.hidden = false;
+  elements.playerName.focus();
+  announce("Congratulations, puzzle solved!");
+}
+
+async function giveHint() {
+  if (!state || loading || state.complete) {
+    return;
   }
-  if (incorrect.size === 0) {
-    msg.style.color = '#388e3c';
-    msg.innerText = 'Congratulations! You solved it!';
-  } else {
-    msg.style.color = '#d32f2f';
-    msg.innerText = 'Some cells are incorrect.';
+  let shouldCheckCompletion = false;
+  setLoading(true);
+  try {
+    const hint = await requestHint(state.gameId, state.board);
+    applyHint(state, hint);
+    render();
+    announce("A correct cell has been filled and locked.");
+    shouldCheckCompletion = isBoardFull(state.board);
+  } catch (error) {
+    announce(error.message, true);
+  } finally {
+    setLoading(false);
+  }
+  if (shouldCheckCompletion) {
+    await checkCurrentBoard(false);
   }
 }
 
-// Wire buttons
-window.addEventListener('load', () => {
-  document.getElementById('new-game').addEventListener('click', newGame);
-  document.getElementById('check-solution').addEventListener('click', checkSolution);
-  // initialize
-  newGame();
-});
+async function onCellInput(row, col, value) {
+  if (!state || loading) {
+    return;
+  }
+  updateCell(state, row, col, value);
+  render();
+  if (state.conflicts.size) {
+    announce("A highlighted value conflicts with its row, column, or square.", true);
+    return;
+  }
+  if (isBoardFull(state.board)) {
+    await checkCurrentBoard(false);
+  }
+}
+
+function saveScore(event) {
+  event.preventDefault();
+  if (!state || !state.complete || state.scoreSaved) {
+    return;
+  }
+  const name = elements.playerName.value.trim().slice(0, 24) || "Player";
+  const scores = addScore({
+    name,
+    timeSeconds: timer.elapsedSeconds(),
+    difficulty: state.difficulty,
+    hintsUsed: state.hintsUsed,
+    createdAt: new Date().toISOString(),
+  });
+  state.scoreSaved = true;
+  renderLeaderboard(elements.leaderboard, scores);
+  elements.scoreForm.hidden = true;
+  announce("Your score has been saved in this browser.");
+}
+
+function initialise() {
+  initializeTheme(elements.themeToggle);
+  createBoard(elements.board, onCellInput);
+  renderLeaderboard(elements.leaderboard, loadLeaderboard());
+  elements.newGame.addEventListener("click", startNewGame);
+  elements.hint.addEventListener("click", giveHint);
+  elements.check.addEventListener("click", () => checkCurrentBoard());
+  elements.difficulty.addEventListener("change", startNewGame);
+  elements.scoreForm.addEventListener("submit", saveScore);
+  startNewGame();
+}
+
+initialise();
